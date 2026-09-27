@@ -409,6 +409,20 @@ pub struct App {
     chat_lock_check: std::cell::RefCell<Option<(String, Option<String>, bool)>>,
     /// Audio messages currently being transcribed with Whisper.
     pub transcribing: HashSet<(ChatId, String)>,
+    /// Chat currently selected in the summarization dialog.
+    pub summary_chat: Option<ChatId>,
+    /// Active scope for message summarization.
+    pub summary_scope: crate::model::SummaryScope,
+    /// Number of days for interval-based summarization.
+    pub summary_days: u32,
+    /// Whether an AI summary request is currently in progress.
+    pub summary_in_progress: bool,
+    /// Number of messages being summarized, if known.
+    pub summary_message_count: Option<usize>,
+    /// Result of the latest summarization request.
+    pub summary_result: Option<Result<String, String>>,
+    /// Whether the summary has been copied to the clipboard.
+    pub summary_copied: bool,
     /// Receipts of the message whose "Message info" is open.
     pub message_receipts: Option<crate::model::MessageReceipts>,
     /// The group message the backend is following receipts for.
@@ -1014,6 +1028,13 @@ impl App {
             new_chat_search: String::new(),
             chat_lock_check: Default::default(),
             transcribing: HashSet::new(),
+            summary_chat: None,
+            summary_scope: crate::model::SummaryScope::Unread,
+            summary_days: 3,
+            summary_in_progress: false,
+            summary_message_count: None,
+            summary_result: None,
+            summary_copied: false,
             message_receipts: None,
             receipts_watch: None,
             invite: None,
@@ -2602,6 +2623,23 @@ impl App {
             Event::TranscriptionFailed { chat, message, error } => {
                 self.transcribing.remove(&(chat, message));
                 self.toast_error(error);
+            }
+            Event::SummaryStarted { chat, message_count } => {
+                if self.summary_chat.as_ref() == Some(&chat) {
+                    self.summary_message_count = Some(message_count);
+                }
+            }
+            Event::SummaryFinished { chat, summary } => {
+                if self.summary_chat.as_ref() == Some(&chat) {
+                    self.summary_in_progress = false;
+                    self.summary_result = Some(Ok(summary));
+                }
+            }
+            Event::SummaryFailed { chat, error } => {
+                if self.summary_chat.as_ref() == Some(&chat) {
+                    self.summary_in_progress = false;
+                    self.summary_result = Some(Err(error));
+                }
             }
             Event::Contacts(contacts) => {
                 for contact in contacts {
@@ -4642,6 +4680,39 @@ impl App {
                 self.settings.whisper_model_path = path;
                 self.mark_settings_dirty();
             }
+            Action::SummarizeChat { chat, scope } => {
+                self.summary_chat = Some(chat.clone());
+                self.summary_scope = scope;
+                self.summary_in_progress = true;
+                self.summary_result = None;
+                self.summary_message_count = None;
+                self.summary_copied = false;
+                let chat_name = self
+                    .chats
+                    .iter()
+                    .find(|c| c.id == chat)
+                    .map(|c| c.name.clone())
+                    .or_else(|| self.contacts.get(&chat).and_then(|c| c.display_name().map(str::to_owned)))
+                    .unwrap_or_else(|| chat.clone());
+                let config = crate::openai::OpenAiConfig {
+                    endpoint: self.settings.openai_endpoint.clone(),
+                    api_key: self.settings.openai_api_key.clone(),
+                    model: self.settings.openai_model.clone(),
+                    custom_prompt: self.settings.openai_custom_prompt.clone(),
+                };
+                self.backend.send(Command::SummarizeChat {
+                    chat,
+                    chat_name,
+                    scope,
+                    config,
+                });
+            }
+            Action::SetSummaryScope(scope) => {
+                self.summary_scope = scope;
+                if let crate::model::SummaryScope::Days(days) = scope {
+                    self.summary_days = days;
+                }
+            }
             Action::StartRecording => {
                 if self.open_chat.is_some() && self.recording.is_none() {
                     self.picker = None;
@@ -5073,12 +5144,35 @@ impl App {
                     self.new_contact_last.clear();
                     self.new_contact_pending = false;
                 }
+                if let Dialog::Summarize(chat) = &dialog {
+                    if self.summary_chat.as_ref() != Some(chat) {
+                        self.summary_chat = Some(chat.clone());
+                        let has_unread = self
+                            .chats
+                            .iter()
+                            .find(|c| c.id == *chat)
+                            .map_or(false, |c| c.looks_unread() || c.unread > 0);
+                        self.summary_scope = if has_unread {
+                            crate::model::SummaryScope::Unread
+                        } else {
+                            crate::model::SummaryScope::Days(3)
+                        };
+                        self.summary_days = 3;
+                        self.summary_in_progress = false;
+                        self.summary_message_count = None;
+                        self.summary_result = None;
+                        self.summary_copied = false;
+                    }
+                }
                 self.contact_edit = None;
                 self.group_name_edit = None;
                 self.dialog = Some(dialog);
             }
             Action::CloseDialog => {
                 self.clear_chat_lock_entry();
+                if matches!(self.dialog, Some(Dialog::Summarize(_))) {
+                    self.summary_copied = false;
+                }
                 self.dialog = None;
                 self.invite = None;
                 self.forward_search.clear();

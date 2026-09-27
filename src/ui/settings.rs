@@ -536,6 +536,98 @@ fn sections(app: &App) -> Vec<Section> {
         },
     );
 
+    let mut ai = Section::new(translated(locale, "AI & Summarization"));
+    ai.row(
+        translated(locale, "OpenAI server URL"),
+        translated(
+            locale,
+            "Base URL for an OpenAI-compatible server (e.g. Ollama, LM Studio, or OpenAI API).",
+        ),
+        move |ui, app| {
+            ui.horizontal(|ui| {
+                let response = ui.add(
+                    egui::TextEdit::singleline(&mut app.settings.openai_endpoint)
+                        .font(theme::regular(13.0))
+                        .text_color(palette.text)
+                        .desired_width(220.0),
+                );
+                if response.changed() {
+                    app.actions.push(Action::SettingsChanged);
+                }
+                if app.settings.openai_endpoint != crate::openai::DEFAULT_OPENAI_ENDPOINT
+                    && theme::soft_button(
+                        ui,
+                        &palette,
+                        Some(Icon::Refresh),
+                        &crate::i18n::gettext(app.locale, "Reset"),
+                        false,
+                    )
+                    .clicked()
+                {
+                    app.settings.openai_endpoint =
+                        crate::openai::DEFAULT_OPENAI_ENDPOINT.to_string();
+                    app.actions.push(Action::SettingsChanged);
+                }
+            });
+        },
+    );
+    ai.row(
+        translated(locale, "Model name"),
+        translated(
+            locale,
+            "Model identifier for summarization (e.g. llama3.2, mistral, gpt-4o-mini).",
+        ),
+        move |ui, app| {
+            let response = ui.add(
+                egui::TextEdit::singleline(&mut app.settings.openai_model)
+                    .font(theme::regular(13.0))
+                    .text_color(palette.text)
+                    .desired_width(220.0),
+            );
+            if response.changed() {
+                app.actions.push(Action::SettingsChanged);
+            }
+        },
+    );
+    ai.row(
+        translated(locale, "API key"),
+        translated(
+            locale,
+            "Optional key for authenticated servers or OpenAI. Local servers usually leave this empty.",
+        ),
+        move |ui, app| {
+            let response = ui.add(
+                egui::TextEdit::singleline(&mut app.settings.openai_api_key)
+                    .font(theme::regular(13.0))
+                    .text_color(palette.text)
+                    .desired_width(220.0)
+                    .password(true),
+            );
+            if response.changed() {
+                app.actions.push(Action::SettingsChanged);
+            }
+        },
+    );
+    ai.row(
+        translated(locale, "Custom system prompt"),
+        translated(
+            locale,
+            "Optional custom instructions for formatting summaries. Leave empty for default.",
+        ),
+        move |ui, app| {
+            let response = ui.add(
+                egui::TextEdit::singleline(&mut app.settings.openai_custom_prompt)
+                    .font(theme::regular(13.0))
+                    .text_color(palette.text)
+                    .desired_width(220.0)
+                    .hint_text("Default instructions"),
+            );
+            if response.changed() {
+                app.actions.push(Action::SettingsChanged);
+            }
+        },
+    );
+
     let mut notifications = Section::new(translated(locale, "Notifications"));
     notifications.account_toggle(
         translated(locale, "Desktop notifications"),
@@ -853,6 +945,7 @@ fn sections(app: &App) -> Vec<Section> {
     vec![
         appearance,
         chats,
+        ai,
         notifications,
         privacy,
         system,

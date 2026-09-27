@@ -1150,6 +1150,143 @@ impl Archive {
         rows.collect()
     }
 
+    /// Returns unread messages for a chat, ascending.
+    pub fn unread_messages(&self, chat: &str) -> Result<Vec<Message>> {
+        let read_through = self.read_through(chat)?.unwrap_or(0);
+        let unread_count = self
+            .chat(chat)?
+            .map(|c| c.unread)
+            .unwrap_or(0);
+
+        if read_through > 0 {
+            let mut statement = self.connection.prepare(
+                "SELECT id, sender, sender_name, from_me, timestamp, content, status, quoted, reactions, edited, thumbnail, mentions, forwarded, delivered_at, read_at
+                 FROM messages
+                 WHERE chat = ?1 AND timestamp > ?2
+                 ORDER BY timestamp ASC, rowid ASC
+                 LIMIT 500",
+            )?;
+            let rows = statement.query_map(params![chat, read_through], |row| {
+                let content: String = row.get(5)?;
+                let quoted: Option<String> = row.get(7)?;
+                let reactions: String = row.get(8)?;
+                let mentions: String = row.get(11)?;
+                Ok(Message {
+                    id: row.get(0)?,
+                    chat: chat.to_owned(),
+                    sender: row.get(1)?,
+                    sender_name: row.get(2)?,
+                    from_me: row.get(3)?,
+                    timestamp: row.get(4)?,
+                    content: serde_json::from_str(&content).unwrap_or(Content::Unsupported {
+                        what: "unreadable".into(),
+                    }),
+                    status: status_from_rank(row.get(6)?),
+                    delivered_at: row.get(13)?,
+                    read_at: row.get(14)?,
+                    quoted: quoted.and_then(|quoted| serde_json::from_str(&quoted).ok()),
+                    reactions: serde_json::from_str(&reactions).unwrap_or_default(),
+                    edited: row.get(9)?,
+                    mentions: serde_json::from_str(&mentions).unwrap_or_default(),
+                    forwarded: row.get(12)?,
+                    thumbnail: row.get(10)?,
+                })
+            })?;
+            let msgs: Vec<Message> = rows.collect::<Result<_>>()?;
+            if !msgs.is_empty() {
+                return Ok(msgs);
+            }
+        }
+
+        if unread_count > 0 {
+            let limit = (unread_count as i64).clamp(1, 500);
+            let mut statement = self.connection.prepare(
+                "SELECT id, sender, sender_name, from_me, timestamp, content, status, quoted, reactions, edited, thumbnail, mentions, forwarded, delivered_at, read_at
+                 FROM messages
+                 WHERE chat = ?1
+                 ORDER BY timestamp DESC, rowid DESC
+                 LIMIT ?2",
+            )?;
+            let rows = statement.query_map(params![chat, limit], |row| {
+                let content: String = row.get(5)?;
+                let quoted: Option<String> = row.get(7)?;
+                let reactions: String = row.get(8)?;
+                let mentions: String = row.get(11)?;
+                Ok(Message {
+                    id: row.get(0)?,
+                    chat: chat.to_owned(),
+                    sender: row.get(1)?,
+                    sender_name: row.get(2)?,
+                    from_me: row.get(3)?,
+                    timestamp: row.get(4)?,
+                    content: serde_json::from_str(&content).unwrap_or(Content::Unsupported {
+                        what: "unreadable".into(),
+                    }),
+                    status: status_from_rank(row.get(6)?),
+                    delivered_at: row.get(13)?,
+                    read_at: row.get(14)?,
+                    quoted: quoted.and_then(|quoted| serde_json::from_str(&quoted).ok()),
+                    reactions: serde_json::from_str(&reactions).unwrap_or_default(),
+                    edited: row.get(9)?,
+                    mentions: serde_json::from_str(&mentions).unwrap_or_default(),
+                    forwarded: row.get(12)?,
+                    thumbnail: row.get(10)?,
+                })
+            })?;
+            let mut msgs: Vec<Message> = rows.collect::<Result<_>>()?;
+            msgs.reverse();
+            return Ok(msgs);
+        }
+
+        Ok(Vec::new())
+    }
+
+    /// Returns messages since `since_timestamp`, ascending and limited.
+    pub fn messages_since(
+        &self,
+        chat: &str,
+        since_timestamp: i64,
+        limit: usize,
+    ) -> Result<Vec<Message>> {
+        let mut statement = self.connection.prepare(
+            "SELECT id, sender, sender_name, from_me, timestamp, content, status, quoted, reactions, edited, thumbnail, mentions, forwarded, delivered_at, read_at
+             FROM messages
+             WHERE chat = ?1 AND timestamp >= ?2
+             ORDER BY timestamp ASC, rowid ASC
+             LIMIT ?3",
+        )?;
+        let rows = statement.query_map(
+            params![chat, since_timestamp, limit as i64],
+            |row| {
+                let content: String = row.get(5)?;
+                let quoted: Option<String> = row.get(7)?;
+                let reactions: String = row.get(8)?;
+                let mentions: String = row.get(11)?;
+                Ok(Message {
+                    id: row.get(0)?,
+                    chat: chat.to_owned(),
+                    sender: row.get(1)?,
+                    sender_name: row.get(2)?,
+                    from_me: row.get(3)?,
+                    timestamp: row.get(4)?,
+                    content: serde_json::from_str(&content).unwrap_or(Content::Unsupported {
+                        what: "unreadable".into(),
+                    }),
+                    status: status_from_rank(row.get(6)?),
+                    delivered_at: row.get(13)?,
+                    read_at: row.get(14)?,
+                    quoted: quoted.and_then(|quoted| serde_json::from_str(&quoted).ok()),
+                    reactions: serde_json::from_str(&reactions).unwrap_or_default(),
+                    edited: row.get(9)?,
+                    mentions: serde_json::from_str(&mentions).unwrap_or_default(),
+                    forwarded: row.get(12)?,
+                    thumbnail: row.get(10)?,
+                })
+            },
+        )?;
+        rows.collect()
+    }
+
     /// Returns downloaded stickers we sent (`from_me`) or received, newest
     /// first. Received stickers stay out of Recent, as in WhatsApp's own apps,
     /// and get their own shelf, which leaves out locked chats so a sticker
@@ -3502,5 +3639,84 @@ mod media_path_tests {
             .clear_media_path("a@s.whatsapp.net", "p1")
             .expect("cleared");
         assert!(archive.media_paths().expect("lists").is_empty());
+    }
+
+    #[test]
+    fn unread_and_since_messages_queries() {
+        let archive = Archive::in_memory().expect("opens");
+        let chat = "test@s.whatsapp.net";
+        archive.ensure_chat(chat, "Test").expect("chat");
+
+        let msg1 = Message {
+            id: "m1".into(),
+            chat: chat.into(),
+            sender: "other".into(),
+            sender_name: Some("Other".into()),
+            from_me: false,
+            timestamp: 100,
+            content: Content::text("Message 1"),
+            status: Delivery::Read,
+            delivered_at: None,
+            read_at: None,
+            quoted: None,
+            reactions: Vec::new(),
+            edited: false,
+            mentions: Vec::new(),
+            forwarded: false,
+            thumbnail: None,
+        };
+        let msg2 = Message {
+            id: "m2".into(),
+            chat: chat.into(),
+            sender: "other".into(),
+            sender_name: Some("Other".into()),
+            from_me: false,
+            timestamp: 200,
+            content: Content::text("Message 2"),
+            status: Delivery::Delivered,
+            delivered_at: None,
+            read_at: None,
+            quoted: None,
+            reactions: Vec::new(),
+            edited: false,
+            mentions: Vec::new(),
+            forwarded: false,
+            thumbnail: None,
+        };
+        let msg3 = Message {
+            id: "m3".into(),
+            chat: chat.into(),
+            sender: "other".into(),
+            sender_name: Some("Other".into()),
+            from_me: false,
+            timestamp: 300,
+            content: Content::text("Message 3"),
+            status: Delivery::Delivered,
+            delivered_at: None,
+            read_at: None,
+            quoted: None,
+            reactions: Vec::new(),
+            edited: false,
+            mentions: Vec::new(),
+            forwarded: false,
+            thumbnail: None,
+        };
+
+        archive.insert_message(&msg1, None).unwrap();
+        archive.insert_message(&msg2, None).unwrap();
+        archive.insert_message(&msg3, None).unwrap();
+
+        // Check messages_since
+        let since_150 = archive.messages_since(chat, 150, 10).unwrap();
+        assert_eq!(since_150.len(), 2);
+        assert_eq!(since_150[0].id, "m2");
+        assert_eq!(since_150[1].id, "m3");
+
+        // Mark read through 150
+        archive.mark_read_through(chat, 150).unwrap();
+        let unread = archive.unread_messages(chat).unwrap();
+        assert_eq!(unread.len(), 2);
+        assert_eq!(unread[0].id, "m2");
+        assert_eq!(unread[1].id, "m3");
     }
 }

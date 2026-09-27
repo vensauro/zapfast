@@ -480,10 +480,30 @@ pub struct Settings {
     /// Optional custom path to a Whisper GGML model file (.bin).
     #[serde(default)]
     pub whisper_model_path: Option<std::path::PathBuf>,
+    /// Base URL for OpenAI-compatible server (e.g. `http://localhost:11434/v1`).
+    #[serde(default = "default_openai_endpoint")]
+    pub openai_endpoint: String,
+    /// Optional API key for OpenAI-compatible server.
+    #[serde(default)]
+    pub openai_api_key: String,
+    /// Model name for OpenAI-compatible server (e.g. `llama3.2`).
+    #[serde(default = "default_openai_model")]
+    pub openai_model: String,
+    /// Optional custom system prompt for message summarization.
+    #[serde(default)]
+    pub openai_custom_prompt: String,
 }
 
 fn default_whisper_language() -> String {
     "auto".to_string()
+}
+
+fn default_openai_endpoint() -> String {
+    crate::openai::DEFAULT_OPENAI_ENDPOINT.to_string()
+}
+
+fn default_openai_model() -> String {
+    crate::openai::DEFAULT_OPENAI_MODEL.to_string()
 }
 
 impl Default for Settings {
@@ -534,6 +554,10 @@ impl Default for Settings {
             auto_transcribe_voice: false,
             whisper_language: default_whisper_language(),
             whisper_model_path: None,
+            openai_endpoint: default_openai_endpoint(),
+            openai_api_key: String::new(),
+            openai_model: default_openai_model(),
+            openai_custom_prompt: String::new(),
         }
     }
 }
@@ -838,6 +862,19 @@ impl AccountRoster {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn openai_settings_have_defaults_and_roundtrip() {
+        let defaults = Settings::default();
+        assert_eq!(defaults.openai_endpoint, "http://localhost:11434/v1");
+        assert_eq!(defaults.openai_model, "llama3.2");
+        assert!(defaults.openai_api_key.is_empty());
+        assert!(defaults.openai_custom_prompt.is_empty());
+
+        let parsed: Settings = serde_json::from_str("{}").unwrap();
+        assert_eq!(parsed.openai_endpoint, "http://localhost:11434/v1");
+        assert_eq!(parsed.openai_model, "llama3.2");
+    }
 
     #[test]
     fn earlier_bundled_sound_names_still_load() {

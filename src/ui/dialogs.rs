@@ -46,10 +46,14 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
                 | Dialog::MessageInfo { .. } => {
                     420.0_f32.min((ui.ctx().content_rect().width() - 64.0).max(180.0))
                 }
+                Dialog::Summarize(_) => {
+                    480.0_f32.min((ui.ctx().content_rect().width() - 48.0).max(200.0))
+                }
                 Dialog::Labels => 460.0,
             });
             ui.spacing_mut().item_spacing.y = 8.0;
             match dialog {
+                Dialog::Summarize(chat) => summarize_dialog(app, ui, &chat),
                 Dialog::CreatePoll(chat) => super::polls::create(app, ui, &chat),
                 Dialog::PollResults { chat, message } => {
                     super::polls::results(app, ui, &chat, &message)
@@ -90,6 +94,198 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
         });
     if response.should_close() {
         app.actions.push(Action::CloseDialog);
+    }
+}
+
+fn summarize_dialog(app: &mut App, ui: &mut egui::Ui, chat: &str) {
+    let palette = app.palette;
+    let locale = app.locale;
+    title(ui, app, &crate::i18n::gettext(locale, "Summarize messages"));
+
+    let chat_obj = app.chats.iter().find(|c| c.id == chat);
+    let chat_name = chat_obj
+        .map(|c| c.name.clone())
+        .or_else(|| app.contacts.get(chat).and_then(|c| c.display_name().map(str::to_owned)))
+        .unwrap_or_else(|| chat.to_string());
+    let unread_count = chat_obj.map_or(0, |c| c.unread);
+
+    theme::text(ui, &chat_name, theme::semibold(15.0), palette.text);
+    ui.add_space(4.0);
+
+    // Scope selection: Unread vs Past days
+    ui.horizontal(|ui| {
+        let unread_text = if unread_count > 0 {
+            format!("{} ({})", crate::i18n::gettext(locale, "Unread messages"), unread_count)
+        } else {
+            crate::i18n::gettext(locale, "Unread messages").into_owned()
+        };
+        let is_unread = app.summary_scope == crate::model::SummaryScope::Unread;
+        if theme::soft_button(ui, &palette, None, &unread_text, is_unread).clicked() {
+            app.actions.push(Action::SetSummaryScope(crate::model::SummaryScope::Unread));
+        }
+
+        let is_days = matches!(app.summary_scope, crate::model::SummaryScope::Days(_));
+        let days_text = crate::i18n::gettext(locale, "Past days");
+        if theme::soft_button(ui, &palette, None, &days_text, is_days).clicked() {
+            let days = if app.summary_days == 0 { 3 } else { app.summary_days };
+            app.actions.push(Action::SetSummaryScope(crate::model::SummaryScope::Days(days)));
+        }
+    });
+
+    if let crate::model::SummaryScope::Days(selected_days) = app.summary_scope {
+        ui.add_space(4.0);
+        ui.horizontal(|ui| {
+            theme::text(ui, crate::i18n::gettext(locale, "Interval:"), theme::regular(13.0), palette.secondary);
+            for d in [1, 3, 7, 14, 30] {
+                let label = if d == 1 {
+                    crate::i18n::gettext(locale, "1 day").into_owned()
+                } else {
+                    format!("{d} {}", crate::i18n::gettext(locale, "days"))
+                };
+                let active = selected_days == d;
+                if theme::soft_button(ui, &palette, None, &label, active).clicked() {
+                    app.actions.push(Action::SetSummaryScope(crate::model::SummaryScope::Days(d)));
+                }
+            }
+        });
+    }
+
+    ui.add_space(6.0);
+
+    // Server info line
+    ui.horizontal(|ui| {
+        let endpoint_display = if app.settings.openai_endpoint.trim().is_empty() {
+            crate::openai::DEFAULT_OPENAI_ENDPOINT
+        } else {
+            app.settings.openai_endpoint.trim()
+        };
+        let model_display = if app.settings.openai_model.trim().is_empty() {
+            crate::openai::DEFAULT_OPENAI_MODEL
+        } else {
+            app.settings.openai_model.trim()
+        };
+        let server_info = format!("Server: {endpoint_display} ({model_display})");
+        theme::text(ui, server_info, theme::regular(12.0), palette.dim);
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            if theme::icon_button(ui, Icon::Settings, 14.0, palette.secondary, palette.text, "Configure AI server in settings").clicked() {
+                app.actions.push(Action::CloseDialog);
+                app.actions.push(Action::Open(crate::model::Page::Settings));
+            }
+        });
+    });
+
+    ui.add_space(6.0);
+
+    if app.summary_in_progress {
+        ui.vertical_centered(|ui| {
+            ui.add_space(16.0);
+            ui.spinner();
+            ui.add_space(8.0);
+            let progress_text = if let Some(count) = app.summary_message_count {
+                format!("Summarizing {} messages with {}...", count, app.settings.openai_model.trim())
+            } else {
+                "Connecting to OpenAI server and generating summary...".to_string()
+            };
+            theme::text(ui, progress_text, theme::regular(13.5), palette.secondary);
+            ui.add_space(16.0);
+        });
+    } else if let Some(ref result) = app.summary_result {
+        match result {
+            Ok(summary) => {
+                ui.add_space(4.0);
+                Frame::new()
+                    .fill(palette.surface)
+                    .corner_radius(CornerRadius::same(theme::RADIUS))
+                    .inner_margin(Margin::same(12))
+                    .show(ui, |ui| {
+                        let height = 240.0_f32.min(ui.available_height() - 60.0).max(120.0);
+                        egui::ScrollArea::vertical()
+                            .id_salt("summary_text_scroll")
+                            .max_height(height)
+                            .auto_shrink([false, true])
+                            .show(ui, |ui| {
+                                ui.set_width(ui.available_width());
+                                ui.add(
+                                    egui::Label::new(
+                                        egui::RichText::new(summary)
+                                            .font(theme::regular(13.5))
+                                            .color(palette.text),
+                                    )
+                                    .wrap()
+                                    .selectable(true),
+                                );
+                            });
+                    });
+
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    let copy_label = if app.summary_copied {
+                        format!("{} ✓", crate::i18n::gettext(locale, "Copied"))
+                    } else {
+                        crate::i18n::gettext(locale, "Copy summary").into_owned()
+                    };
+                    if theme::soft_button(ui, &palette, Some(Icon::Copy), &copy_label, false).clicked() {
+                        app.actions.push(Action::CopyText(summary.clone()));
+                        app.summary_copied = true;
+                    }
+                    if theme::soft_button(ui, &palette, Some(Icon::Refresh), &crate::i18n::gettext(locale, "Regenerate"), false).clicked() {
+                        app.actions.push(Action::SummarizeChat {
+                            chat: chat.to_string(),
+                            scope: app.summary_scope,
+                        });
+                    }
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        if theme::pill_button(ui, &palette, &crate::i18n::gettext(locale, "Close"), false).clicked() {
+                            app.actions.push(Action::CloseDialog);
+                        }
+                    });
+                });
+            }
+            Err(error) => {
+                ui.add_space(4.0);
+                Frame::new()
+                    .fill(palette.surface)
+                    .corner_radius(CornerRadius::same(theme::RADIUS))
+                    .inner_margin(Margin::same(12))
+                    .show(ui, |ui| {
+                        theme::text(ui, "Summarization failed", theme::semibold(14.0), palette.text);
+                        ui.add_space(4.0);
+                        theme::paragraph(ui, error, theme::regular(13.0), palette.accent);
+                    });
+
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    if theme::pill_button(ui, &palette, &crate::i18n::gettext(locale, "Try again"), true).clicked() {
+                        app.actions.push(Action::SummarizeChat {
+                            chat: chat.to_string(),
+                            scope: app.summary_scope,
+                        });
+                    }
+                    if theme::soft_button(ui, &palette, Some(Icon::Settings), "Settings", false).clicked() {
+                        app.actions.push(Action::CloseDialog);
+                        app.actions.push(Action::Open(crate::model::Page::Settings));
+                    }
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        if theme::pill_button(ui, &palette, &crate::i18n::gettext(locale, "Close"), false).clicked() {
+                            app.actions.push(Action::CloseDialog);
+                        }
+                    });
+                });
+            }
+        }
+    } else {
+        ui.add_space(8.0);
+        ui.horizontal(|ui| {
+            if theme::pill_button(ui, &palette, &crate::i18n::gettext(locale, "Summarize"), true).clicked() {
+                app.actions.push(Action::SummarizeChat {
+                    chat: chat.to_string(),
+                    scope: app.summary_scope,
+                });
+            }
+            if theme::pill_button(ui, &palette, &crate::i18n::gettext(locale, "Cancel"), false).clicked() {
+                app.actions.push(Action::CloseDialog);
+            }
+        });
     }
 }
 

@@ -1153,6 +1153,15 @@ pub struct Gif {
     pub height: u32,
 }
 
+/// Scope of chat messages to summarize.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SummaryScope {
+    /// Unread messages in the chat.
+    Unread,
+    /// Messages from the last `N` days.
+    Days(u32),
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum Dialog {
     Shortcuts,
@@ -1161,6 +1170,8 @@ pub enum Dialog {
     ConfirmRemoveAccount(AccountId),
     /// Phone number used for pairing-code linking.
     PairWithPhone,
+    /// Summarize messages via OpenAI-compatible server.
+    Summarize(ChatId),
     /// Contacts and the self-chat shortcut.
     NewChat,
     /// Manually entered number for messaging or saving a contact.
@@ -1432,6 +1443,13 @@ pub enum Action {
         chat: ChatId,
         message: String,
     },
+    /// Requests a summary of chat messages via OpenAI-compatible server.
+    SummarizeChat {
+        chat: ChatId,
+        scope: SummaryScope,
+    },
+    /// Updates the chosen summary scope in the dialog.
+    SetSummaryScope(SummaryScope),
     /// Plays or pauses a downloaded video inside its message.
     PlayVideo {
         message: String,

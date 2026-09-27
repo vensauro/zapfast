@@ -341,6 +341,18 @@ pub enum Command {
         message: String,
         result: Result<String, String>,
     },
+    /// Requests a summary of chat messages via OpenAI-compatible server.
+    SummarizeChat {
+        chat: ChatId,
+        chat_name: String,
+        scope: crate::model::SummaryScope,
+        config: crate::openai::OpenAiConfig,
+    },
+    /// Internal: Result of background summarization job.
+    SummaryFinished {
+        chat: ChatId,
+        result: Result<String, String>,
+    },
     /// Sends a WebP sticker.
     SendSticker {
         chat: ChatId,
@@ -867,6 +879,21 @@ pub enum Event {
     TranscriptionFailed {
         chat: ChatId,
         message: String,
+        error: String,
+    },
+    /// Background message summarization started with the given message count.
+    SummaryStarted {
+        chat: ChatId,
+        message_count: usize,
+    },
+    /// Background message summarization finished successfully.
+    SummaryFinished {
+        chat: ChatId,
+        summary: String,
+    },
+    /// Background message summarization failed.
+    SummaryFailed {
+        chat: ChatId,
         error: String,
     },
     /// Link-time history sync state.

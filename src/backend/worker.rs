@@ -5039,6 +5039,16 @@ impl Worker {
                     });
                 }
             },
+            Command::SummarizeChat {
+                chat,
+                chat_name,
+                scope,
+                config,
+            } => self.summarize_chat(chat, chat_name, scope, config),
+            Command::SummaryFinished { chat, result } => match result {
+                Ok(summary) => self.emit(Event::SummaryFinished { chat, summary }),
+                Err(error) => self.emit(Event::SummaryFailed { chat, error }),
+            },
             Command::SendGif { chat, gif, quoting } => self.send_gif(chat, gif, quoting),
             Command::SearchGifs { query, key } => {
                 let commands = self.commands.clone();
@@ -7279,6 +7289,72 @@ impl Worker {
             let _ = commands.send(Command::TranscriptionFinished {
                 chat: chat_clone,
                 message: message_clone,
+                result,
+            });
+        });
+    }
+
+    fn summarize_chat(
+        &mut self,
+        chat: ChatId,
+        chat_name: String,
+        scope: crate::model::SummaryScope,
+        config: crate::openai::OpenAiConfig,
+    ) {
+        let messages = match scope {
+            crate::model::SummaryScope::Unread => match self.archive.unread_messages(&chat) {
+                Ok(msgs) => msgs,
+                Err(e) => {
+                    self.emit(Event::SummaryFailed {
+                        chat,
+                        error: format!("Failed to read archive: {e}"),
+                    });
+                    return;
+                }
+            },
+            crate::model::SummaryScope::Days(days) => {
+                let now = jiff::Timestamp::now().as_second();
+                let since = now - (i64::from(days) * 86400);
+                match self.archive.messages_since(&chat, since, 500) {
+                    Ok(msgs) => msgs,
+                    Err(e) => {
+                        self.emit(Event::SummaryFailed {
+                            chat,
+                            error: format!("Failed to read archive: {e}"),
+                        });
+                        return;
+                    }
+                }
+            }
+        };
+
+        if messages.is_empty() {
+            let error = match scope {
+                crate::model::SummaryScope::Unread => {
+                    "No unread messages found in this chat.".to_string()
+                }
+                crate::model::SummaryScope::Days(1) => {
+                    "No messages found in the last day.".to_string()
+                }
+                crate::model::SummaryScope::Days(n) => {
+                    format!("No messages found in the last {n} days.")
+                }
+            };
+            self.emit(Event::SummaryFailed { chat, error });
+            return;
+        }
+
+        self.emit(Event::SummaryStarted {
+            chat: chat.clone(),
+            message_count: messages.len(),
+        });
+
+        let commands = self.commands.clone();
+        let chat_clone = chat.clone();
+        tokio::task::spawn_blocking(move || {
+            let result = crate::openai::summarize_messages(&config, &chat_name, &messages);
+            let _ = commands.send(Command::SummaryFinished {
+                chat: chat_clone,
                 result,
             });
         });

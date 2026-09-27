@@ -234,6 +234,7 @@ fn header(app: &mut App, ui: &mut egui::Ui, chat: &Chat) -> Rect {
                         ui,
                         &[
                             "Info",
+                            "Summarize messages",
                             "Pin to top",
                             "Unarchive",
                             "Clear chat",
@@ -255,6 +256,15 @@ fn header(app: &mut App, ui: &mut egui::Ui, chat: &Chat) -> Rect {
                             if widgets::menu_item(ui, &palette, Some(Icon::Info), "Info") {
                                 app.actions
                                     .push(Action::ShowDialog(Dialog::ChatInfo(chat.id.clone())));
+                            }
+                            if widgets::menu_item(
+                                ui,
+                                &palette,
+                                Some(Icon::FileText),
+                                "Summarize messages",
+                            ) {
+                                app.actions
+                                    .push(Action::ShowDialog(Dialog::Summarize(chat.id.clone())));
                             }
                             if widgets::menu_item(
                                 ui,
@@ -341,6 +351,20 @@ fn header(app: &mut App, ui: &mut egui::Ui, chat: &Chat) -> Rect {
                         } else {
                             Action::OpenChatSearch
                         });
+                    }
+                    let summarize_tip = crate::i18n::gettext(app.locale, "Summarize messages");
+                    if theme::icon_button(
+                        ui,
+                        Icon::FileText,
+                        18.0,
+                        palette.secondary,
+                        palette.text,
+                        &summarize_tip,
+                    )
+                    .clicked()
+                    {
+                        app.actions
+                            .push(Action::ShowDialog(Dialog::Summarize(chat.id.clone())));
                     }
                 });
             });
