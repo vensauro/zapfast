@@ -567,6 +567,9 @@ pub struct Settings {
     /// Optional custom system prompt for message summarization.
     #[serde(default)]
     pub openai_custom_prompt: String,
+    /// Request timeout in seconds for OpenAI-compatible server.
+    #[serde(default = "default_openai_timeout_secs")]
+    pub openai_timeout_secs: u32,
 }
 
 fn default_whisper_language() -> String {
@@ -579,6 +582,10 @@ fn default_openai_endpoint() -> String {
 
 fn default_openai_model() -> String {
     crate::openai::DEFAULT_OPENAI_MODEL.to_string()
+}
+
+fn default_openai_timeout_secs() -> u32 {
+    300
 }
 
 impl Default for Settings {
@@ -643,6 +650,7 @@ impl Default for Settings {
             openai_api_key: String::new(),
             openai_model: default_openai_model(),
             openai_custom_prompt: String::new(),
+            openai_timeout_secs: default_openai_timeout_secs(),
         }
     }
 }
