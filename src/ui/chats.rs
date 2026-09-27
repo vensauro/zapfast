@@ -1681,6 +1681,7 @@ fn row(app: &mut App, ui: &mut egui::Ui, chat: &Chat) -> egui::Response {
         &[
             "Mark as read",
             "Mark as unread",
+            "Summarize messages",
             "Pin to top",
             favorite_label.as_ref(),
             "Unarchive",
@@ -2048,6 +2049,10 @@ fn context_menu(app: &mut App, ui: &mut egui::Ui, chat: &Chat, palette: &Palette
         )
     {
         app.actions.push(Action::MarkUnread(chat.id.clone()));
+    }
+    if widgets::menu_item(ui, palette, Some(Icon::FileText), "Summarize messages") {
+        app.actions
+            .push(Action::ShowDialog(Dialog::Summarize(chat.id.clone())));
     }
     let pin_label = if chat.pinned {
         crate::i18n::gettext(locale, "Unpin")

@@ -38,6 +38,7 @@ pub mod motion;
 pub mod nav;
 pub mod new_group;
 pub mod notify;
+pub mod openai;
 pub mod opener;
 pub mod paths;
 pub mod privacy;
