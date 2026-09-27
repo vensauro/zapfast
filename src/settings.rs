@@ -471,6 +471,19 @@ pub struct Settings {
     pub app_lock_hash: Option<String>,
     /// How long ZapFast may go unused before the app lock locks it.
     pub app_lock_after: AutoLock,
+    /// Automatically transcribe voice messages with Whisper.
+    #[serde(default)]
+    pub auto_transcribe_voice: bool,
+    /// Language code for Whisper transcription ("auto", "pt", "en", "es", etc.).
+    #[serde(default = "default_whisper_language")]
+    pub whisper_language: String,
+    /// Optional custom path to a Whisper GGML model file (.bin).
+    #[serde(default)]
+    pub whisper_model_path: Option<std::path::PathBuf>,
+}
+
+fn default_whisper_language() -> String {
+    "auto".to_string()
 }
 
 impl Default for Settings {
@@ -518,6 +531,9 @@ impl Default for Settings {
             chat_lock_hint_dismissed: false,
             app_lock_hash: None,
             app_lock_after: AutoLock::default(),
+            auto_transcribe_voice: false,
+            whisper_language: default_whisper_language(),
+            whisper_model_path: None,
         }
     }
 }

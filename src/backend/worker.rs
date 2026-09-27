@@ -545,6 +545,7 @@ pub async fn run(
         early: Default::default(),
         link_watch: Default::default(),
         forward_queue: None,
+        transcribe_when_downloaded: HashMap::new(),
     };
     worker.load_state();
     worker.backfill();
@@ -825,6 +826,8 @@ struct Worker {
     downloads: HashSet<(ChatId, String, Option<usize>)>,
     /// Serial forward in flight. The next send waits for the running one.
     forward_queue: Option<ForwardQueue<ForwardJob>>,
+    /// Transcription queued for an attachment that is currently downloading.
+    transcribe_when_downloaded: HashMap<(ChatId, String), (String, Option<PathBuf>)>,
 }
 
 /// A queued forward: where it goes, the protobuf, and its disappearing timer.
@@ -4988,6 +4991,54 @@ impl Worker {
                     self.mark_played(chat, message, sender);
                 }
             }
+            Command::TranscribeAudio {
+                chat,
+                message,
+                language,
+                model_path,
+            } => self.transcribe_audio(chat, message, language, model_path),
+            Command::PickWhisperModel => {
+                let events = self.events.clone();
+                let waker = self.waker.clone();
+                tokio::task::spawn_blocking(move || {
+                    let mut dialog = rfd::FileDialog::new()
+                        .set_title("Choose Whisper model")
+                        .add_filter("GGML Model (*.bin)", &["bin"]);
+                    if let Some(home) = directories::UserDirs::new() {
+                        dialog = dialog.set_directory(home.home_dir());
+                    }
+                    if let Some(path) = dialog.pick_file() {
+                        let _ = events.send(Event::WhisperModelPicked(path));
+                        waker.wake();
+                    }
+                });
+            }
+            Command::TranscriptionFinished {
+                chat,
+                message,
+                result,
+            } => match result {
+                Ok(text) => match self.archive.set_audio_transcription(&chat, &message, &text) {
+                    Ok(Some(updated)) => {
+                        self.emit(Event::MessageUpdated(Box::new(updated)));
+                    }
+                    Ok(None) => {}
+                    Err(e) => {
+                        self.emit(Event::TranscriptionFailed {
+                            chat,
+                            message,
+                            error: e.to_string(),
+                        });
+                    }
+                },
+                Err(error) => {
+                    self.emit(Event::TranscriptionFailed {
+                        chat,
+                        message,
+                        error,
+                    });
+                }
+            },
             Command::SendGif { chat, gif, quoting } => self.send_gif(chat, gif, quoting),
             Command::SearchGifs { query, key } => {
                 let commands = self.commands.clone();
@@ -6568,10 +6619,15 @@ impl Worker {
         let for_picker = self.sticker_downloads.remove(&(chat.clone(), id.clone()));
         self.emit(Event::Media {
             card,
-            chat,
-            message: id,
-            result,
+            chat: chat.clone(),
+            message: id.clone(),
+            result: result.clone(),
         });
+        if let Some((language, model_path)) = self.transcribe_when_downloaded.remove(&(chat.clone(), id.clone())) {
+            if result.is_ok() {
+                self.transcribe_audio(chat, id, language, model_path);
+            }
+        }
         // Listing the shelves scans the archive; one pass per batch keeps
         // a send queued behind many picker downloads from waiting on each.
         if for_picker && self.sticker_downloads.is_empty() {
@@ -7180,6 +7236,51 @@ impl Worker {
                     });
                 }
             }
+        });
+    }
+
+    fn transcribe_audio(
+        &mut self,
+        chat: ChatId,
+        message: String,
+        language: String,
+        model_path: Option<PathBuf>,
+    ) {
+        let Ok(Some(msg)) = self.archive.message(&chat, &message) else {
+            self.emit(Event::TranscriptionFailed {
+                chat,
+                message,
+                error: "Message not found".to_string(),
+            });
+            return;
+        };
+        let Some(media) = msg.content.media() else {
+            self.emit(Event::TranscriptionFailed {
+                chat,
+                message,
+                error: "Message has no audio".to_string(),
+            });
+            return;
+        };
+        let Some(path) = media.path.clone() else {
+            self.transcribe_when_downloaded
+                .insert((chat.clone(), message.clone()), (language, model_path));
+            self.download(chat, message);
+            return;
+        };
+
+        let commands = self.commands.clone();
+        let chat_clone = chat.clone();
+        let message_clone = message.clone();
+
+        tokio::task::spawn_blocking(move || {
+            let result =
+                crate::whisper::transcribe_file(&path, &language, model_path.as_deref());
+            let _ = commands.send(Command::TranscriptionFinished {
+                chat: chat_clone,
+                message: message_clone,
+                result,
+            });
         });
     }
 
@@ -7871,6 +7972,7 @@ fn classify_base(base: &wa::Message) -> Option<Content> {
             seconds: audio.seconds,
             voice_note: audio.ptt.unwrap_or(false),
             waveform: audio.waveform.clone().unwrap_or_default(),
+            transcription: None,
         });
     }
     if let Some(document) = base.document_message.as_option() {
@@ -8142,6 +8244,7 @@ async fn prepare_voice(
             seconds: Some(seconds),
             voice_note: true,
             waveform,
+            transcription: None,
         },
         thumbnail: None,
         bytes,
@@ -8305,6 +8408,7 @@ async fn prepare_media(
                 seconds: None,
                 voice_note: false,
                 waveform: Vec::new(),
+                transcription: None,
             },
             thumbnail: None,
             bytes,
@@ -11443,6 +11547,7 @@ mod receipt_tests {
             early: Default::default(),
             link_watch: Default::default(),
             forward_queue: None,
+            transcribe_when_downloaded: HashMap::new(),
         };
         (worker, events_rx, inbox, wa_events)
     }

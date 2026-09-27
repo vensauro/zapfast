@@ -409,6 +409,90 @@ fn sections(app: &App) -> Vec<Section> {
         ),
         |settings| &mut settings.auto_download,
     );
+    chats.toggle(
+        translated(locale, "Transcribe voice messages automatically"),
+        translated(
+            locale,
+            "Transcribes incoming voice messages in the background using Whisper.",
+        ),
+        |settings| &mut settings.auto_transcribe_voice,
+    );
+    let model_status = crate::whisper::active_model_display_name(app.settings.whisper_model_path.as_deref())
+        .unwrap_or_else(|| "No model found. Click Choose model to select a ggml-*.bin file.".to_string());
+    chats.row(
+        translated(locale, "Whisper model"),
+        translated(
+            locale,
+            "Offline speech recognition model for transcribing voice messages.",
+        ),
+        move |ui, app| {
+            ui.vertical(|ui| {
+                theme::text(ui, model_status, theme::regular(13.0), palette.secondary);
+                ui.add_space(4.0);
+                ui.horizontal(|ui| {
+                    if theme::soft_button(
+                        ui,
+                        &palette,
+                        None,
+                        &crate::i18n::gettext(app.locale, "Choose model..."),
+                        false,
+                    )
+                    .clicked()
+                    {
+                        app.actions.push(Action::PickWhisperModel);
+                    }
+                    if app.settings.whisper_model_path.is_some()
+                        && theme::soft_button(
+                            ui,
+                            &palette,
+                            Some(Icon::Refresh),
+                            &crate::i18n::gettext(app.locale, "Reset to auto-detect"),
+                            false,
+                        )
+                        .clicked()
+                    {
+                        app.actions.push(Action::SetWhisperModel(None));
+                    }
+                });
+            });
+        },
+    );
+    chats.row(
+        translated(locale, "Transcription language"),
+        translated(
+            locale,
+            "Language used by Whisper for audio transcription.",
+        ),
+        move |ui, app| {
+            let languages = [
+                ("auto", "Auto-detect"),
+                ("en", "English"),
+                ("pt", "Portuguese"),
+                ("es", "Spanish"),
+                ("fr", "French"),
+                ("de", "German"),
+                ("it", "Italian"),
+            ];
+            let current = app.settings.whisper_language.as_str();
+            let label = languages
+                .iter()
+                .find(|(code, _)| *code == current)
+                .map(|(_, name)| *name)
+                .unwrap_or(current);
+            egui::ComboBox::from_id_salt("whisper_language")
+                .selected_text(label)
+                .width(180.0_f32.min(ui.available_width()))
+                .show_ui(ui, |ui| {
+                    for (code, name) in languages {
+                        let is_selected = app.settings.whisper_language == code;
+                        if ui.selectable_label(is_selected, name).clicked() {
+                            app.settings.whisper_language = code.to_string();
+                            app.actions.push(Action::SettingsChanged);
+                        }
+                    }
+                });
+        },
+    );
     // macOS has no public API to pause other apps' media.
     if crate::media_pause::SUPPORTED {
         chats.toggle(

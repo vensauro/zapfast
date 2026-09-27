@@ -326,6 +326,21 @@ pub enum Command {
         sender: String,
         receipts: bool,
     },
+    /// Transcribes an audio message with Whisper.
+    TranscribeAudio {
+        chat: ChatId,
+        message: String,
+        language: String,
+        model_path: Option<PathBuf>,
+    },
+    /// Asks for a Whisper GGML model file (.bin).
+    PickWhisperModel,
+    /// Internal: Result of background transcription job.
+    TranscriptionFinished {
+        chat: ChatId,
+        message: String,
+        result: Result<String, String>,
+    },
     /// Sends a WebP sticker.
     SendSticker {
         chat: ChatId,
@@ -848,6 +863,12 @@ pub enum Event {
         message: String,
         result: Result<PathBuf, String>,
     },
+    /// Audio transcription failed.
+    TranscriptionFailed {
+        chat: ChatId,
+        message: String,
+        error: String,
+    },
     /// Link-time history sync state.
     Syncing(bool),
     /// Reported history-sync percentage.
@@ -886,6 +907,8 @@ pub enum Event {
     },
     /// A folder chosen for new downloads.
     DownloadFolderPicked(std::path::PathBuf),
+    /// A Whisper model file chosen by the user.
+    WhisperModelPicked(std::path::PathBuf),
     /// The copy of a chosen wallpaper image, or why it could not be used.
     WallpaperImagePicked(Result<std::path::PathBuf, String>),
     /// An audio file chosen as a notification sound.

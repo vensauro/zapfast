@@ -170,6 +170,7 @@ pub fn respond(app: &mut App) {
                         seconds: Some(seconds.max(1.0) as u32),
                         voice_note: true,
                         waveform: crate::voice::waveform(&samples),
+                        transcription: None,
                     },
                 );
                 row.id = "tour-voice".into();

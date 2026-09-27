@@ -825,6 +825,29 @@ impl Archive {
         Ok(Some(message))
     }
 
+    /// Stores a Whisper transcription for an audio message.
+    pub fn set_audio_transcription(
+        &self,
+        chat: &str,
+        id: &str,
+        transcription: &str,
+    ) -> Result<Option<Message>> {
+        let Some(mut message) = self.message(chat, id)? else {
+            return Ok(None);
+        };
+        if let Content::Audio {
+            transcription: ref mut target,
+            ..
+        } = message.content
+        {
+            *target = Some(transcription.to_owned());
+            self.set_content(chat, id, &message.content, message.edited)?;
+            Ok(Some(message))
+        } else {
+            Ok(None)
+        }
+    }
+
     /// Returns all recorded attachment paths.
     pub fn media_paths(&self) -> Result<Vec<(String, String, std::path::PathBuf)>> {
         let mut statement = self.connection.prepare(

@@ -425,6 +425,9 @@ pub enum Content {
         /// Sender-provided 64-bar voice waveform.
         #[serde(default)]
         waveform: Vec<u8>,
+        /// Whisper transcription of the audio, if available.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        transcription: Option<String>,
     },
     Document {
         media: Media,
@@ -708,6 +711,10 @@ impl Content {
             Self::Poll { question, .. } => vec![question],
             Self::Contact { display_name, .. } => vec![display_name],
             Self::Location { name, .. } => name.as_deref().into_iter().collect(),
+            Self::Audio {
+                transcription: Some(text),
+                ..
+            } => vec![text.as_str()],
             _ => Vec::new(),
         }
     }
@@ -726,6 +733,18 @@ impl Content {
             Self::Video {
                 caption, gif, note, ..
             } => captioned(video_label(*gif, *note), caption),
+            Self::Audio {
+                voice_note,
+                transcription: Some(text),
+                ..
+            } => {
+                let label = if *voice_note {
+                    "Voice message"
+                } else {
+                    "Audio"
+                };
+                format!("{label}: {text}")
+            }
             _ => self.summary(),
         }
     }
@@ -742,8 +761,22 @@ impl Content {
             Self::Audio {
                 voice_note,
                 seconds,
+                transcription,
                 ..
             } => {
+                if let Some(text) = transcription {
+                    if let Some(line) = text.lines().next() {
+                        let trimmed = line.trim();
+                        if !trimmed.is_empty() {
+                            let label = if *voice_note {
+                                "Voice message"
+                            } else {
+                                "Audio"
+                            };
+                            return format!("{label}: {trimmed}");
+                        }
+                    }
+                }
                 let label = if *voice_note {
                     "Voice message"
                 } else {
@@ -836,12 +869,27 @@ impl Content {
             Self::Interactive {
                 card: Some(old), ..
             },
-        ) = (self, old)
+        ) = (&mut *self, old)
         {
             for (new, old) in new.carousel.iter_mut().zip(&old.carousel) {
                 if let (Some(new), Some(old)) = (&mut new.image, &old.image) {
                     new.path = old.path.clone();
                 }
+            }
+        }
+        if let (
+            Self::Audio {
+                transcription: new_transcription,
+                ..
+            },
+            Self::Audio {
+                transcription: old_transcription,
+                ..
+            },
+        ) = (&mut *self, old)
+        {
+            if new_transcription.is_none() && old_transcription.is_some() {
+                *new_transcription = old_transcription.clone();
             }
         }
     }
@@ -1379,6 +1427,11 @@ pub enum Action {
     },
     /// Sets the voice playback speed to one of the supported speeds.
     SetVoiceSpeed(f32),
+    /// Transcribes an audio message with Whisper.
+    TranscribeAudio {
+        chat: ChatId,
+        message: String,
+    },
     /// Plays or pauses a downloaded video inside its message.
     PlayVideo {
         message: String,
@@ -1714,6 +1767,10 @@ pub enum Action {
     RemoveGroupPicture(ChatId),
     /// Sets or resets (`None`) the folder for new downloads.
     SetDownloadFolder(Option<PathBuf>),
+    /// Asks for a Whisper GGML model file (.bin).
+    PickWhisperModel,
+    /// Sets or resets (`None`) the custom Whisper model file.
+    SetWhisperModel(Option<PathBuf>),
     /// Saves the proxy setting and reconnects. Empty follows the environment.
     SetProxy(String),
     /// Plays a notification sound once, as a preview.
@@ -2087,10 +2144,22 @@ mod tests {
                 media: media(),
                 seconds: Some(65),
                 voice_note: true,
-                waveform: Vec::new()
+                waveform: Vec::new(),
+                transcription: None,
             }
             .summary(),
             "Voice message (1:05)"
+        );
+        assert_eq!(
+            Content::Audio {
+                media: media(),
+                seconds: Some(65),
+                voice_note: true,
+                waveform: Vec::new(),
+                transcription: Some("Hello world".into()),
+            }
+            .summary(),
+            "Voice message: Hello world"
         );
     }
 
@@ -2110,8 +2179,20 @@ mod tests {
             seconds: Some(65),
             voice_note: true,
             waveform: Vec::new(),
+            transcription: None,
         };
         assert_eq!(voice.full_summary(), voice.summary());
+        let transcribed_voice = Content::Audio {
+            media: media(),
+            seconds: Some(65),
+            voice_note: true,
+            waveform: Vec::new(),
+            transcription: Some("Whisper transcribed this audio".into()),
+        };
+        assert_eq!(
+            transcribed_voice.full_summary(),
+            "Voice message: Whisper transcribed this audio"
+        );
     }
 
     #[test]
