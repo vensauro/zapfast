@@ -546,6 +546,19 @@ pub struct Settings {
     pub window_y: Option<f32>,
     /// Whether the window was maximized when it last closed.
     pub window_maximized: bool,
+    /// Automatically transcribe voice messages with Whisper.
+    #[serde(default)]
+    pub auto_transcribe_voice: bool,
+    /// Language code for Whisper transcription ("auto", "pt", "en", "es", etc.).
+    #[serde(default = "default_whisper_language")]
+    pub whisper_language: String,
+    /// Optional custom path to a Whisper GGML model file (.bin).
+    #[serde(default)]
+    pub whisper_model_path: Option<std::path::PathBuf>,
+}
+
+fn default_whisper_language() -> String {
+    "auto".to_string()
 }
 
 impl Default for Settings {
@@ -603,6 +616,9 @@ impl Default for Settings {
             window_x: None,
             window_y: None,
             window_maximized: false,
+            auto_transcribe_voice: false,
+            whisper_language: default_whisper_language(),
+            whisper_model_path: None,
         }
     }
 }

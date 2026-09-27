@@ -575,6 +575,8 @@ pub struct App {
     pub new_chat_search: String,
     /// Last answer from the slow code verifier, keyed by what was checked.
     chat_lock_check: std::cell::RefCell<Option<(String, Option<String>, bool)>>,
+    /// Audio messages currently being transcribed with Whisper.
+    pub transcribing: HashSet<(ChatId, String)>,
     /// Receipts of the message whose "Message info" is open.
     pub message_receipts: Option<crate::model::MessageReceipts>,
     /// The group message the backend is following receipts for.
@@ -1608,6 +1610,7 @@ impl App {
             chat_lock_error: false,
             new_chat_search: String::new(),
             chat_lock_check: Default::default(),
+            transcribing: HashSet::new(),
             message_receipts: None,
             receipts_watch: None,
             invite: None,
@@ -4140,6 +4143,7 @@ impl App {
             }
             Event::MessageUpdated(message) => {
                 let message = *message;
+                self.transcribing.remove(&(message.chat.clone(), message.id.clone()));
                 // The starred panel holds its own copy. An edit has to
                 // replace that row, or the open list keeps the old text.
                 let in_starred = self.starred.iter().any(|entry| {
@@ -4219,6 +4223,10 @@ impl App {
                 if let Some(chat) = restamped.filter(|_| !self.events_hidden) {
                     self.order_selection(&chat);
                 }
+            }
+            Event::TranscriptionFailed { chat, message, error } => {
+                self.transcribing.remove(&(chat, message));
+                self.toast_error(error);
             }
             Event::Contacts(contacts) => {
                 if live {
@@ -4579,6 +4587,11 @@ impl App {
             Event::DownloadFolderPicked(path) => {
                 if live {
                     self.actions.push(Action::SetDownloadFolder(Some(path)));
+                }
+            }
+            Event::WhisperModelPicked(path) => {
+                if live {
+                    self.actions.push(Action::SetWhisperModel(Some(path)));
                 }
             }
             Event::WallpaperImagePicked(Ok(path)) => {
@@ -5981,6 +5994,16 @@ impl App {
                             path,
                         });
                     }
+                }
+                if self.settings.auto_transcribe_voice
+                    && let Some(conversation) = self.conversations.get(chat)
+                    && let Some(msg) = conversation.message(id)
+                    && let Content::Audio { transcription: None, .. } = &msg.content
+                {
+                    self.actions.push(Action::TranscribeAudio {
+                        chat: chat.to_owned(),
+                        message: id.to_owned(),
+                    });
                 }
             }
             Err(()) => {
@@ -8572,6 +8595,22 @@ impl App {
             Action::SetVoiceSpeed(speed) => {
                 self.settings.voice_speed = crate::audio::supported_speed(speed);
                 self.sync_voice_speed();
+                self.mark_settings_dirty();
+            }
+            Action::TranscribeAudio { chat, message } => {
+                self.transcribing.insert((chat.clone(), message.clone()));
+                let language = self.settings.whisper_language.clone();
+                let model_path = self.settings.whisper_model_path.clone();
+                self.backend.send(Command::TranscribeAudio {
+                    chat,
+                    message,
+                    language,
+                    model_path,
+                });
+            }
+            Action::PickWhisperModel => self.backend.send(Command::PickWhisperModel),
+            Action::SetWhisperModel(path) => {
+                self.settings.whisper_model_path = path;
                 self.mark_settings_dirty();
             }
             Action::StartRecording => {
@@ -20315,6 +20354,7 @@ mod tests {
             seconds: Some(3),
             voice_note: true,
             waveform: Vec::new(),
+            transcription: None,
         };
         row
     }
