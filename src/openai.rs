@@ -26,6 +26,7 @@ pub struct OpenAiConfig {
     pub api_key: String,
     pub model: String,
     pub custom_prompt: String,
+    pub timeout_secs: u32,
 }
 
 #[derive(Serialize)]
@@ -34,6 +35,7 @@ struct ChatCompletionRequest<'a> {
     messages: Vec<ChatMessage<'a>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     temperature: Option<f32>,
+    stream: bool,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -103,6 +105,48 @@ pub fn format_messages_for_prompt(messages: &[Message]) -> String {
     transcript
 }
 
+/// Parses Server-Sent Events (SSE) data chunks in case the server streams tokens.
+pub fn parse_sse_content(text: &str) -> Option<String> {
+    let mut combined = String::new();
+    for line in text.lines() {
+        let trimmed = line.trim();
+        if let Some(data) = trimmed.strip_prefix("data:") {
+            let data = data.trim();
+            if data == "[DONE]" || data.is_empty() {
+                continue;
+            }
+            #[derive(Deserialize)]
+            struct StreamChunk {
+                #[serde(default)]
+                choices: Vec<StreamChoice>,
+            }
+            #[derive(Deserialize)]
+            struct StreamChoice {
+                delta: Option<StreamDelta>,
+            }
+            #[derive(Deserialize)]
+            struct StreamDelta {
+                content: Option<String>,
+            }
+            if let Ok(chunk) = serde_json::from_str::<StreamChunk>(data) {
+                if let Some(c) = chunk.choices.into_iter().next() {
+                    if let Some(delta) = c.delta {
+                        if let Some(content) = delta.content {
+                            combined.push_str(&content);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    let trimmed = combined.trim().to_string();
+    if !trimmed.is_empty() {
+        Some(trimmed)
+    } else {
+        None
+    }
+}
+
 /// Sends a summarization request to the OpenAI-compatible server.
 pub fn summarize_messages(
     config: &OpenAiConfig,
@@ -120,17 +164,33 @@ pub fn summarize_messages(
         config.custom_prompt.trim()
     };
 
-    let transcript = format_messages_for_prompt(messages);
+    // Cap at the most recent 100 messages to prevent local LLM prompt exhaustion.
+    let (selected_messages, was_capped) = if messages.len() > 100 {
+        (&messages[messages.len() - 100..], true)
+    } else {
+        (messages, false)
+    };
+
+    let transcript = format_messages_for_prompt(selected_messages);
     if transcript.trim().is_empty() {
         return Err("The selected messages contain no readable text or transcriptions.".to_string());
     }
 
-    let user_prompt = format!(
-        "Please summarize the following {} messages from the chat \"{}\":\n\n{}\nSummary:",
-        messages.len(),
-        chat_name,
-        transcript
-    );
+    let user_prompt = if was_capped {
+        format!(
+            "Please summarize the following {} messages (showing the most recent 100) from the chat \"{}\":\n\n{}\nSummary:",
+            messages.len(),
+            chat_name,
+            transcript
+        )
+    } else {
+        format!(
+            "Please summarize the following {} messages from the chat \"{}\":\n\n{}\nSummary:",
+            messages.len(),
+            chat_name,
+            transcript
+        )
+    };
 
     let request_body = ChatCompletionRequest {
         model: if config.model.trim().is_empty() {
@@ -149,10 +209,17 @@ pub fn summarize_messages(
             },
         ],
         temperature: Some(0.5),
+        stream: false,
+    };
+
+    let timeout_secs = if config.timeout_secs == 0 {
+        300
+    } else {
+        config.timeout_secs
     };
 
     let mut builder = reqwest::blocking::Client::builder()
-        .timeout(Duration::from_secs(90));
+        .timeout(Duration::from_secs(u64::from(timeout_secs)));
 
     if let Some(proxy) = crate::proxy::reqwest_proxy() {
         builder = builder.proxy(proxy);
@@ -182,7 +249,9 @@ pub fn summarize_messages(
                     config.endpoint.trim()
                 )
             } else if e.is_timeout() {
-                "Request timed out while waiting for server response.".to_string()
+                format!(
+                    "Request timed out after {timeout_secs} seconds while waiting for the AI server to respond. You can increase the timeout in Settings."
+                )
             } else {
                 format!("HTTP request failed: {e}")
             }
@@ -204,18 +273,23 @@ pub fn summarize_messages(
         return Err(format!("Server returned error ({status}): {text}"));
     }
 
-    let parsed: ChatCompletionResponse = serde_json::from_str(&text)
-        .map_err(|e| format!("Failed to parse response JSON: {e}"))?;
-
-    if let Some(choice) = parsed.choices.into_iter().next() {
-        if let Some(msg) = choice.message {
-            if let Some(content) = msg.content {
-                let trimmed = content.trim().to_string();
-                if !trimmed.is_empty() {
-                    return Ok(trimmed);
+    // Try standard JSON format first.
+    if let Ok(parsed) = serde_json::from_str::<ChatCompletionResponse>(&text) {
+        if let Some(choice) = parsed.choices.into_iter().next() {
+            if let Some(msg) = choice.message {
+                if let Some(content) = msg.content {
+                    let trimmed = content.trim().to_string();
+                    if !trimmed.is_empty() {
+                        return Ok(trimmed);
+                    }
                 }
             }
         }
+    }
+
+    // Fallback: check if the response was streamed as Server-Sent Events (SSE).
+    if let Some(sse_content) = parse_sse_content(&text) {
+        return Ok(sse_content);
     }
 
     Err("OpenAI server returned an empty summary.".to_string())
@@ -333,5 +407,12 @@ mod tests {
             parsed.error.as_ref().unwrap().message.as_deref(),
             Some("model not found")
         );
+    }
+
+    #[test]
+    fn test_parse_sse_content() {
+        let sse_data = "data: {\"choices\":[{\"delta\":{\"content\":\"Hello \"}}]}\n\ndata: {\"choices\":[{\"delta\":{\"content\":\"world!\"}}]}\n\ndata: [DONE]\n";
+        let parsed = parse_sse_content(sse_data);
+        assert_eq!(parsed.as_deref(), Some("Hello world!"));
     }
 }

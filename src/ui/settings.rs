@@ -627,6 +627,42 @@ fn sections(app: &App) -> Vec<Section> {
             }
         },
     );
+    ai.row(
+        translated(locale, "Request timeout"),
+        translated(
+            locale,
+            "Timeout waiting for the AI server to respond. Increase for large models or slow CPUs.",
+        ),
+        move |ui, app| {
+            let timeout_options = [
+                (60, "1 minute"),
+                (120, "2 minutes"),
+                (300, "5 minutes (default)"),
+                (600, "10 minutes"),
+                (900, "15 minutes"),
+                (1800, "30 minutes"),
+            ];
+            let current = app.settings.openai_timeout_secs;
+            let label = timeout_options
+                .iter()
+                .find(|(secs, _)| *secs == current)
+                .map(|(_, desc)| (*desc).to_string())
+                .unwrap_or_else(|| format!("{current} seconds"));
+
+            egui::ComboBox::from_id_salt("openai_timeout")
+                .selected_text(label)
+                .width(180.0_f32.min(ui.available_width()))
+                .show_ui(ui, |ui| {
+                    for (secs, desc) in timeout_options {
+                        let is_selected = app.settings.openai_timeout_secs == secs;
+                        if ui.selectable_label(is_selected, desc).clicked() {
+                            app.settings.openai_timeout_secs = secs;
+                            app.actions.push(Action::SettingsChanged);
+                        }
+                    }
+                });
+        },
+    );
 
     let mut notifications = Section::new(translated(locale, "Notifications"));
     notifications.account_toggle(

@@ -4699,6 +4699,7 @@ impl App {
                     api_key: self.settings.openai_api_key.clone(),
                     model: self.settings.openai_model.clone(),
                     custom_prompt: self.settings.openai_custom_prompt.clone(),
+                    timeout_secs: self.settings.openai_timeout_secs,
                 };
                 self.backend.send(Command::SummarizeChat {
                     chat,
