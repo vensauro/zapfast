@@ -561,6 +561,7 @@ mod tests {
             seconds: Some(42),
             voice_note: true,
             waveform: vec![],
+            transcription: None,
         };
         assert_eq!(content_description(en, &voice, ""), "Voice message, 0:42");
         let photo = Content::Image {

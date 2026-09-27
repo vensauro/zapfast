@@ -60,3 +60,4 @@ pub mod video;
 pub mod video_rate;
 pub mod voice;
 pub mod wallpaper;
+pub mod whisper;

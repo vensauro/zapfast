@@ -635,6 +635,7 @@ pub fn populate(app: &mut App) {
                     seconds: Some(42),
                     voice_note: true,
                     waveform: demo_waveform(),
+                    transcription: None,
                 },
             );
             // The reply below says it was heard.
@@ -651,6 +652,7 @@ pub fn populate(app: &mut App) {
                 seconds: Some(11),
                 voice_note: true,
                 waveform: demo_waveform(),
+                transcription: None,
             },
         ),
         {
@@ -9682,6 +9684,7 @@ mod tests {
                 seconds: Some(5),
                 voice_note: true,
                 waveform: demo_waveform(),
+                transcription: None,
             },
         )];
         render(&mut app, &ctx);
@@ -9742,6 +9745,7 @@ mod tests {
                 seconds: Some(5),
                 voice_note: true,
                 waveform: demo_waveform(),
+                transcription: None,
             },
         )];
         render(&mut app, &ctx);

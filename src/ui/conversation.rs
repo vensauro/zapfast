@@ -2241,6 +2241,7 @@ struct View<'a> {
     interactive_pending: &'a HashSet<(ChatId, String)>,
     /// Whether this chat is selecting whole messages.
     selecting: bool,
+    transcribing: &'a HashSet<(ChatId, String)>,
     anchor: Option<&'a str>,
     /// Demo/test: keep this message's context menu open.
     open_menu: Option<&'a str>,
@@ -2362,7 +2363,7 @@ fn estimated_height(message: &Message, width: f32, new_day: bool, notices: usize
         }
         Content::Document { caption, .. } => 70.0 + caption_rows(caption),
         Content::Sticker { .. } => 140.0,
-        Content::Audio { .. } => 60.0,
+        Content::Audio { transcription, .. } => 60.0 + caption_rows(transcription),
         _ => 40.0,
     };
     // Bubble padding, the sender line, and the row spacing, plus the date
@@ -2616,6 +2617,7 @@ fn messages(app: &mut App, ui: &mut egui::Ui, chat: &Chat, under: f32) {
             .selection
             .as_ref()
             .is_some_and(|(selected_chat, _)| *selected_chat == chat.id),
+        transcribing: &app.transcribing,
         anchor: if conversation.loading_older || conversation.fetching_phone {
             None
         } else {
@@ -6126,6 +6128,7 @@ pub(crate) fn list_menu(
         connected: app.link.is_connected(),
         poll_voting: &app.poll_voting,
         interactive_pending: &app.interactive_sending,
+        transcribing: &app.transcribing,
         // Nothing scrolls, highlights, or selects in a list row.
         anchor: None,
         open_menu: None,
@@ -6484,6 +6487,10 @@ fn context_menu(
             ..
         } => Some(format!("{latitude},{longitude}")),
         Content::Contact { vcard, .. } => Some(vcard.clone()),
+        Content::Audio {
+            transcription: Some(transcription),
+            ..
+        } => Some(transcription.clone()),
         _ => None,
     };
     if let Some(text) = text
@@ -6496,6 +6503,24 @@ fn context_menu(
     {
         let mentions = mentions_of(view, message);
         actions.push(Action::CopyText(markup::plain(&text, &mentions)));
+    }
+    if let Content::Audio { transcription, .. } = &message.content {
+        let is_transcribing = view
+            .transcribing
+            .contains(&(view.chat.id.clone(), message.id.clone()));
+        if !is_transcribing {
+            let label = if transcription.is_some() {
+                "Transcribe again"
+            } else {
+                "Transcribe audio"
+            };
+            if widgets::menu_item(ui, &palette, Some(Icon::Mic), label) {
+                actions.push(Action::TranscribeAudio {
+                    chat: view.chat.id.clone(),
+                    message: message.id.clone(),
+                });
+            }
+        }
     }
     let age = view.now - message.timestamp;
     let can_edit = message.from_me
@@ -6862,6 +6887,7 @@ fn content(
         Content::Image { caption, .. }
         | Content::Video { caption, .. }
         | Content::Document { caption, .. } => caption.is_some(),
+        Content::Audio { transcription, .. } => transcription.is_some(),
         _ => false,
     };
     if !has_body && let Some(copy_rows) = view.copy_rows {
@@ -6984,10 +7010,72 @@ fn content(
             media,
             seconds,
             waveform,
+            transcription,
             ..
-        } => voice_player(
-            ui, view, message, media, *seconds, waveform, width, reserve, actions,
-        ),
+        } => {
+            voice_player(
+                ui, view, message, media, *seconds, waveform, width, reserve, actions,
+            );
+            let is_transcribing = view
+                .transcribing
+                .contains(&(view.chat.id.clone(), message.id.clone()));
+            if let Some(transcription) = transcription {
+                ui.add_space(4.0);
+                rich_body(
+                    ui,
+                    view,
+                    message,
+                    transcription,
+                    width,
+                    Some(reserve),
+                    Some(width),
+                    actions,
+                )
+            } else if is_transcribing {
+                ui.add_space(4.0);
+                ui.horizontal(|ui| {
+                    theme::spinner(ui, 12.0, view.palette.accent);
+                    ui.add_space(4.0);
+                    theme::text(
+                        ui,
+                        "Transcribing audio...",
+                        theme::regular(11.5),
+                        view.palette.secondary,
+                    );
+                });
+                None
+            } else {
+                ui.add_space(3.0);
+                ui.horizontal(|ui| {
+                    let text = "Transcribe";
+                    let galley = ui.painter().layout_no_wrap(
+                        text.to_owned(),
+                        theme::regular(11.5),
+                        view.palette.accent,
+                    );
+                    let (rect, resp) = ui.allocate_exact_size(galley.size(), Sense::click());
+                    let resp = resp.on_hover_cursor(egui::CursorIcon::PointingHand);
+                    if ui.is_rect_visible(rect) {
+                        let color = if resp.hovered() {
+                            view.palette.accent_hover
+                        } else {
+                            view.palette.accent
+                        };
+                        ui.painter().galley(rect.min, galley, color);
+                    }
+                    if resp
+                        .on_hover_text("Transcribe voice message using Whisper")
+                        .clicked()
+                    {
+                        actions.push(Action::TranscribeAudio {
+                            chat: view.chat.id.clone(),
+                            message: message.id.clone(),
+                        });
+                    }
+                });
+                None
+            }
+        }
         Content::Document {
             media,
             file_name,
@@ -11192,6 +11280,7 @@ mod tests {
             connected: false,
             poll_voting: &app.poll_voting,
             interactive_pending: &app.interactive_sending,
+            transcribing: &app.transcribing,
             anchor: None,
             open_menu: None,
             reaction: None,

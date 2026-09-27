@@ -153,6 +153,8 @@ sonora-aec3 = "0.2"
 symphonia = { version = "0.5.5", default-features = false, features = ["aac"] }
 opus = "0.4"
 ogg = "0.9"
+whisper-rs = "0.16.0"
+hound = "3.5"
 # Converts animated Signal APNG stickers to the animated WebP used by WhatsApp.
 webp-animation = "0.10"
 # Encodes stickers made from pictures as still lossy WebP. Already included
