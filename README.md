@@ -44,7 +44,26 @@ https://github.com/user-attachments/assets/2bf86b54-45fc-4add-8de7-c426c3cdad9b
 
 </details>
 
-[Features](#your-chats-on-your-desktop) · [Install](#install) · [Link your phone](#link-your-phone) · [Help](#guides-and-help)
+[Features](#your-chats-on-your-desktop) · [Fork features](#differences-from-upstream-zapfast-fork) · [Install](#install) · [Link your phone](#link-your-phone) · [Help](#guides-and-help)
+
+## Differences from upstream (ZapFast fork)
+
+This fork extends upstream ZapFast with local voice message transcription and AI chat summarization:
+
+- **Local Whisper voice transcription**:
+  - Transcribe incoming and outgoing voice messages directly on your machine using embedded Whisper speech recognition ([`whisper-rs`](https://github.com/tazz4843/whisper-rs)).
+  - Runs 100% locally—voice message audio never leaves your computer or gets sent to third-party services.
+  - Automatic GGML model discovery (scans common system model paths and local folders) or custom GGML `.bin` model selection in **Settings > Voice messages > Whisper**.
+  - Optional auto-transcription for newly arrived voice messages.
+  - Configurable transcription language (automatic detection, or specific language codes like `pt`, `en`, `es`).
+  - Interactive transcriptions shown directly inside voice message bubbles with selectable, copyable text, loading indicators, and retry actions.
+
+- **AI chat summarization**:
+  - Summarize unread messages or conversation history across configurable time windows (1, 3, 7, 14, or 30 days).
+  - Compatible with any OpenAI-compatible API endpoint—including local LLMs ([Ollama](https://ollama.com/), [LM Studio](https://lmstudio.ai/), vLLM, LocalAI) and cloud providers.
+  - Trigger summarization from the summary icon in the chat header or the chat context menu (**Summarize…**).
+  - Dedicated summarization modal with message counts, progress indicator, formatted summary text with markdown layout, copy-to-clipboard button, and retry support.
+  - Customizable in **Settings > AI Summarization**: endpoint URL, API key, model name, request timeout, and custom system prompt.
 
 ## Your chats, on your desktop
 
