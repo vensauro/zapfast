@@ -32,6 +32,25 @@ See **[zapfast.rocks](https://zapfast.rocks)** for downloads and guides.
   <img src="docs/screenshot-link.png" alt="The linking screen with the QR code">
 </picture>
 
+## Differences from upstream (ZapFast fork)
+
+This fork extends upstream ZapFast with local voice message transcription and AI chat summarization:
+
+- **Local Whisper voice transcription**:
+  - Transcribe incoming and outgoing voice messages directly on your machine using embedded Whisper speech recognition ([`whisper-rs`](https://github.com/tazz4843/whisper-rs)).
+  - Runs 100% locally—voice message audio never leaves your computer or gets sent to third-party services.
+  - Automatic GGML model discovery (scans common system model paths and local folders) or custom GGML `.bin` model selection in **Settings > Voice messages > Whisper**.
+  - Optional auto-transcription for newly arrived voice messages.
+  - Configurable transcription language (automatic detection, or specific language codes like `pt`, `en`, `es`).
+  - Interactive transcriptions shown directly inside voice message bubbles with selectable, copyable text, loading indicators, and retry actions.
+
+- **AI chat summarization**:
+  - Summarize unread messages or conversation history across configurable time windows (1, 3, 7, 14, or 30 days).
+  - Compatible with any OpenAI-compatible API endpoint—including local LLMs ([Ollama](https://ollama.com/), [LM Studio](https://lmstudio.ai/), vLLM, LocalAI) and cloud providers.
+  - Trigger summarization from the summary icon in the chat header or the chat context menu (**Summarize…**).
+  - Dedicated summarization modal with message counts, progress indicator, formatted summary text with markdown layout, copy-to-clipboard button, and retry support.
+  - Customizable in **Settings > AI Summarization**: endpoint URL, API key, model name, request timeout, and custom system prompt.
+
 ## What it does
 
 - **Links to your phone.** Scan a QR code or link with your phone number.
@@ -207,7 +226,9 @@ See **[zapfast.rocks](https://zapfast.rocks)** for downloads and guides.
   media go with them, and history that was already on its way does not bring
   them back.
 - **Voice messages.** Play, seek, record, reply with, and send voice messages
-  in the chat. The speed chip cycles between 1x, 1.5x, and 2x, and the
+  in the chat. Voice messages can also be transcribed on-device with local
+  Whisper speech recognition (toggle automatic transcription in Settings, or
+  transcribe on demand from the message bubble). The speed chip cycles between 1x, 1.5x, and 2x, and the
   message menu offers 1x, 1.25x, 1.5x, 1.75x, and 2x, keeping the speaker's
   pitch; the last choice applies to later messages. When one ends, playback
   carries on through the voice messages right after it that you have not
@@ -219,6 +240,10 @@ See **[zapfast.rocks](https://zapfast.rocks)** for downloads and guides.
   playing are resumed. **Pause other media while recording or playing** in
   Settings turns this off. Linux uses MPRIS, so any player that implements it
   works; macOS has no public API for this, so the switch is hidden there.
+- **Chat summarization.** Summarize unread messages or recent conversation
+  intervals (1, 3, 7, 14, or 30 days) using any OpenAI-compatible endpoint
+  (such as local Ollama, LM Studio, or OpenAI). Click the summary icon in the
+  chat header or choose **Summarize…** from a chat's context menu.
 - **Send messages.** Press Enter to send text and Shift+Enter for a new line.
   You can swap these keys in Settings. The composer is focused when you open
   or return to a conversation, and clicking empty conversation space returns
@@ -707,6 +732,37 @@ unlocking one never opens the other, and locking ZapFast closes the locked
 tab. Preview it with `--demo --demo-page app-lock` (the password is
 `demo-password`), `app-lock-wrong`, `app-lock-forgot`, `app-lock-settings`,
 or `app-lock-setup`.
+
+### Voice message transcription (Whisper)
+
+Voice messages can be transcribed directly on your computer without sending any audio
+to external servers.
+
+- **Model setup**: ZapFast searches for Whisper GGML models (`ggml-*.bin`) in standard
+  model locations or your current directory. You can also pick a custom model file
+  under **Settings > Voice messages > Model**.
+- **Automatic transcription**: Turn on **Automatically transcribe voice messages** in
+  Settings to have incoming voice messages transcribed automatically as soon as their
+  audio finishes downloading.
+- **On-demand transcription**: Click **Transcribe** inside any voice message bubble to
+  transcribe that message. Once transcribed, the text appears in the bubble and can be
+  selected and copied just like ordinary text.
+- **Language**: Set your preferred language code (such as `pt`, `en`, `es`) or leave it
+  as `auto` to let Whisper detect the spoken language.
+
+### AI chat summarization
+
+Catch up on conversations quickly using an AI summary of unread messages or recent days.
+
+- **Opening the summary**: Click the summary icon in the chat header, or right-click any
+  chat in the chat list and choose **Summarize…**.
+- **Scope**: Choose between summarizing all unread messages in the chat or all messages
+  from the last 1, 3, 7, 14, or 30 days.
+- **OpenAI-compatible server**: Works out of the box with local models running on
+  [Ollama](https://ollama.com/) (e.g. `http://localhost:11434/v1`), [LM Studio](https://lmstudio.ai/)
+  (`http://localhost:1234/v1`), vLLM, LocalAI, or official OpenAI endpoints.
+- **Settings**: Configure the API endpoint, API key (optional for local servers), model name,
+  request timeout, and custom system prompt under **Settings > AI Summarization**.
 
 ### Interactive messages
 
