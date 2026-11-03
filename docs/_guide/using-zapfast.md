@@ -59,8 +59,7 @@ When you write a new text message with a web link and pause, ZapFast fetches
 that page, and its picture from wherever the page says it is, directly, through
 your proxy if one is set, and shows a preview card above the message box, for the first link. Edits
 and captions get no card. The card is sent with the message. ZapFast identifies
-itself to the site as ZapFast, and some sites give no preview to apps they do
-not recognise, in which case the message goes out with a plain link. ZapFast
+itself with WhatsApp's crawler signature, though some sites give no preview without client-side scripts, in which case the message goes out with a plain link. ZapFast
 never looks up or contacts addresses on this computer or your local network
 itself, and refuses links that name one outright. With a proxy set, the proxy
 looks up the name instead. Click the cross on the card to send the link without

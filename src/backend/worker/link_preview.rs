@@ -7,10 +7,10 @@ use std::time::Duration;
 
 use crate::model::{ComposedPreview, LinkPreview};
 
-const USER_AGENT: &str = concat!("ZapFast/", env!("CARGO_PKG_VERSION"));
+const USER_AGENT: &str = "WhatsApp/2.24.1.1";
 /// Page and picture together.
 const TOTAL_TIME: Duration = Duration::from_secs(5);
-const MAX_PAGE: usize = 512 * 1024;
+const MAX_PAGE: usize = 2 * 1024 * 1024;
 const MAX_IMAGE: usize = 2 * 1024 * 1024;
 const MAX_REDIRECTS: usize = 5;
 const THUMB_SIDE: u32 = 300;
